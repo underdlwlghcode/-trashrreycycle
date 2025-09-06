@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쓰레기 줍기 대항전</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://kit.fontawesome.com/a2503d6d07.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        .container {
+            max-width: 768px;
+            margin: auto;
+            padding: 1.5rem;
+        }
+        .section-header {
+            border-bottom: 2px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 flex items-center justify-center">
+    <div id="app" class="container bg-white rounded-3xl shadow-xl overflow-hidden p-6 md:p-10 space-y-8">
+        <h1 class="text-3xl md:text-4xl font-extrabold text-center text-gray-800 mb-6">
+            쓰레기 줍기 대항전
+        </h1>
+
+        <div class="bg-blue-50 p-6 rounded-2xl shadow-inner border border-blue-200">
+            <div class="flex items-center space-x-3 mb-4">
+                <i class="fas fa-user-circle text-2xl text-blue-500"></i>
+                <h2 class="text-xl md:text-2xl font-bold text-gray-700">내 프로필 및 팀</h2>
+            </div>
+            <div class="space-y-4">
+                <input type="text" id="userNameInput" placeholder="사용자 이름"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">
+                <input type="text" id="teamNameInput" placeholder="팀 이름"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">
+                <button id="profileSubmitBtn"
+                        class="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition duration-200 shadow-md">
+                    프로필 업데이트 및 팀 가입
+                </button>
+            </div>
+            <div id="teamInfo" class="mt-6 p-4 bg-white rounded-xl border border-gray-200 text-sm hidden">
+                <p>내 팀: <span id="myTeamName" class="font-bold text-gray-800"></span></p>
+                <p>현재 점수: <span id="myTeamScore" class="font-bold text-blue-600"></span>점</p>
+                <p>현재 순위: <span id="myTeamRank" class="font-bold text-blue-600"></span>위</p>
+                <p class="text-gray-400 mt-2 text-xs">유저 ID: <span id="userIdDisplay"></span></p>
+            </div>
+        </div>
+
+        <div class="bg-green-50 p-6 rounded-2xl shadow-inner border border-green-200">
+            <div class="flex items-center space-x-3 mb-4">
+                <i class="fas fa-recycle text-2xl text-green-500"></i>
+                <h2 class="text-xl md:text-2xl font-bold text-gray-700">쓰레기 기록 제출</h2>
+            </div>
+            <div class="space-y-4">
+                <input type="number" id="weightInput" placeholder="무게(kg)를 입력하세요"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition duration-200">
+                <button id="submitBtn"
+                        class="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition duration-200 shadow-md disabled:opacity-50" disabled>
+                    기록 제출
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-purple-50 p-6 rounded-2xl shadow-inner border border-purple-200">
+            <div class="flex items-center space-x-3 mb-4">
+                <i class="fas fa-trophy text-2xl text-purple-500"></i>
+                <h2 class="text-xl md:text-2xl font-bold text-gray-700">실시간 순위표</h2>
+            </div>
+            <div id="leaderboardList" class="space-y-2">
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import firebaseConfig from "./src/firebase-config.js";
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, addDoc, onSnapshot, getDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        
+        const app = initializeApp(firebaseConfig);
+        let db, auth; 
+        let userId = null;
+        let myTeamName = null;
+        let myTeamScore = 0;
+
+        const userNameInput = document.getElementById('userNameInput');
+        const teamNameInput = document.getElementById('teamNameInput');
+        const profileSubmitBtn = document.getElementById('profileSubmitBtn');
+        const weightInput = document.getElementById('weightInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const myTeamNameDisplay = document.getElementById('myTeamName');
+        const myTeamScoreDisplay = document.getElementById('myTeamScore');
+        const myTeamRankDisplay = document.getElementById('myTeamRank');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const teamInfoSection = document.getElementById('teamInfo');
+
+        const initializeFirebase = async () => {
+            try {
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdDisplay.textContent = userId;
+                        await fetchUserProfile();
+                        setupFirestoreListeners();
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+            }
+        };
+
+        const fetchUserProfile = async () => {
+            if (!db || !userId) return;
+            const userDocRef = doc(db, 'users', userId);
+            try {
+                const userDoc = await getDoc(userDocRef);
+                if (userDoc.exists()) {
+                    const data = userDoc.data();
+                    userNameInput.value = data.userName;
+                    teamNameInput.value = data.teamName;
+                    myTeamName = data.teamName;
+                    updateMyTeamInfo([]);
+                }
+            } catch (e) {
+                console.error('Failed to fetch user profile:', e);
+            }
+        };
+
+        const setupFirestoreListeners = () => {
+            if (!db) return;
+            const leaderboardQuery = query(collection(db, 'teams'), orderBy('score', 'desc'));
+            onSnapshot(leaderboardQuery, (querySnapshot) => {
+                const teams = [];
+                querySnapshot.forEach((doc) => {
+                    teams.push({ id: doc.id, ...doc.data() });
+                });
+                renderLeaderboard(teams);
+                updateMyTeamInfo(teams);
+            }, (error) => {
+                console.error('Failed to listen to leaderboard:', error);
+            });
+        };
+
+        const renderLeaderboard = (teams) => {
+            leaderboardList.innerHTML = '';
+            if (teams.length === 0) {
+                leaderboardList.innerHTML = '<p class="text-center text-gray-500">아직 팀 점수가 없습니다.</p>';
+            }
+            teams.forEach((team, index) => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg shadow-sm';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-4">
+                        <span class="text-xl font-bold text-gray-700 w-8 text-center">${index + 1}.</span>
+                        <span class="text-lg font-semibold text-gray-800">${team.teamName}</span>
+                    </div>
+                    <span class="text-xl font-bold text-blue-600">${team.score}점</span>
+                `;
+                leaderboardList.appendChild(item);
+            });
+        };
+
+        const updateMyTeamInfo = (teams) => {
+            if (myTeamName) {
+                const myTeam = teams.find(team => team.id === myTeamName);
+                if (myTeam) {
+                    myTeamScore = myTeam.score;
+                    myTeamNameDisplay.textContent = myTeam.teamName;
+                    myTeamScoreDisplay.textContent = myTeam.score;
+                    myTeamRankDisplay.textContent = teams.findIndex(team => team.id === myTeamName) + 1;
+                    teamInfoSection.classList.remove('hidden');
+                } else {
+                    teamInfoSection.classList.add('hidden');
+                }
+            }
+        };
+
+        profileSubmitBtn.addEventListener('click', async () => {
+            const userName = userNameInput.value.trim();
+            const teamName = teamNameInput.value.trim();
+            if (!userName || !teamName) {
+                alert('팀 이름과 사용자 이름을 모두 입력해 주세요.');
+                return;
+            }
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const userDocRef = doc(db, 'users', userId);
+                    const teamDocRef = doc(db, 'teams', teamName);
+                    
+                    const userDoc = await transaction.get(userDocRef);
+                    const teamDoc = await transaction.get(teamDocRef);
+
+                    transaction.set(userDocRef, { userName, teamName }, { merge: true });
+
+                    if (!teamDoc.exists()) {
+                        transaction.set(teamDocRef, { teamName, score: 0 });
+                    }
+                });
+                
+                myTeamName = teamName;
+                alert(`프로필이 업데이트되었고, '${teamName}' 팀에 가입되었습니다.`);
+            } catch (e) {
+                console.error('Failed to submit profile:', e);
+                alert('프로필 업데이트에 실패했습니다. 다시 시도해 주세요.');
+            }
+        });
+        
+        weightInput.addEventListener('input', () => {
+            const weightValue = parseFloat(weightInput.value);
+            if (!isNaN(weightValue) && weightValue > 0) {
+                submitBtn.disabled = false;
+            } else {
+                submitBtn.disabled = true;
+            }
+        });
+
+        submitBtn.addEventListener('click', async () => {
+            const weightValue = parseFloat(weightInput.value);
+            if (isNaN(weightValue) || weightValue <= 0 || !myTeamName) {
+                alert('유효한 무게를 입력하고, 팀에 가입해 주세요.');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            const score = weightValue * 100;
+            const loadingText = '기록 제출 중...';
+            const originalButtonText = submitBtn.innerHTML;
+            submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${loadingText}`;
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const teamDocRef = doc(db, 'teams', myTeamName);
+                    const userRecordDocRef = doc(collection(db, 'users', userId, 'records'));
+                    
+                    const teamDoc = await transaction.get(teamDocRef);
+
+                    if (teamDoc.exists()) {
+                        const newScore = teamDoc.data().score + score;
+                        transaction.update(teamDocRef, { score: newScore });
+                    } else {
+                        transaction.set(teamDocRef, { teamName: myTeamName, score });
+                    }
+
+                    transaction.set(userRecordDocRef, {
+                        weight: weightValue,
+                        score,
+                        timestamp: new Date().toISOString(),
+                    });
+                });
+
+                alert(`기록이 제출되었습니다! 팀 점수 +${score}점!`);
+                weightInput.value = '';
+            } catch (e) {
+                console.error('Failed to submit record:', e);
+                alert('기록 제출에 실패했습니다. 다시 시도해 주세요.');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonText;
+            }
+        });
+
+        initializeFirebase();
+    </script>
+</body>
+</html>

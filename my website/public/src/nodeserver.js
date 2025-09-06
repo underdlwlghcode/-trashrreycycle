@@ -1,0 +1,2 @@
+const fs = require('fs'); const https = require('https'); const express = require('express'); const path = require('path'); const app = express(); app.use(express.static(path.join(__dirname, 'public'))); 
+// public 폴더에 html/js 넣기 https.createServer({ key: fs.readFileSync('localhost-key.pem'), cert: fs.readFileSync('localhost.pem'), }, app).listen(3000, () => console.log('HTTPS on https://localhost:3000'));
